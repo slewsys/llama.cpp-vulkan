@@ -46,6 +46,8 @@ install-ompi ()
 
     pushd "$builddir" >/dev/null
     sudo make install || return $?
+    sudo tee >/dev/null /etc/ld.so.conf.d/ompi.conf <<<'/opt/rocm/lib'
+    sudo ldconfig
     popd >/dev/null
 }
 

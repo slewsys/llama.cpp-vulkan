@@ -79,5 +79,7 @@ AC_CONFIG_FILES([install-llama.cpp-rocm],             [chmod +x install-llama.cp
 AC_CONFIG_FILES([install-asdf],                       [chmod +x install-asdf])
 AC_CONFIG_FILES([install-intel-oneapi-hpc],           [chmod +x install-intel-oneapi-hpc])
 AC_CONFIG_FILES([build-rocm],                         [chmod +x build-rocm])
+AC_CONFIG_FILES([install-ucx],                        [chmod +x install-ucx])
+AC_CONFIG_FILES([install-ompi],                       [chmod +x install-ompi])
 
 AC_OUTPUT

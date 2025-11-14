@@ -12,7 +12,7 @@ setup-rocm ()
     fi
 
     sudo install -d -m 0755 "$rocm_root" || return $?
-    curl -sSL "$release_url" |
+    curl -b .cookies -c .cookies -sSL "$release_url" |
         gzip -d - |
         sudo tar -C "$rocm_root" -xf -
 }
@@ -39,7 +39,7 @@ build-ucx ()
 
     pushd "$builddir" >/dev/null
     popd +1 >/dev/null
-    ../configure  \
+    CFLAGS='-Wl,-rpath=/usr/local/lib' ../configure  \
         --prefix="$install_prefix" \
         --with-rocm=/opt/rocm \
         --without-knem \
@@ -69,10 +69,11 @@ if test ."$0" = ."${BASH_SOURCE[0]}"; then
     declare ucx_root=${2:-'/usr/local'}
 
     declare rocm_release_url='https://repo.amd.com/rocm/tarball/therock-dist-linux-gfx1151-7.9.0rc1.tar.gz'
+    declare ucx_repo_url='https://github.com/openucx/ucx.git'
     declare ucx_srcdir=${PWD}/ucx
 
     setup-rocm "$rocm_root" "$rocm_release_url" || exit $?
-    clone-repo "$rocm_release_url" "$ucx_srcdir" || exit $?
+    clone-repo "$ucx_repo_url" "$ucx_srcdir" || exit $?
     build-ucx "$ucx_srcdir" "$ucx_root" || exit $?
     install-ucx "$ucx_srcdir" || exit $?
 fi

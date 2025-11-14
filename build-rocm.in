@@ -123,30 +123,30 @@ install-prerequisites ()
             if command -v gcc >/dev/null                                \
                     && command -v g++ >/dev/null                        \
                     && command -v gfortran >/dev/null; then
-                $SUDO_CMD $DNF_CMD install -y automake cmake doxygen    \
-                          git git-lfs libquadmath-devel libtool         \
+                $SUDO_CMD $DNF_CMD install -y automake ccache cmake     \
+                          doxygen git git-lfs libquadmath-devel libtool \
                           mesa-libEGL-devel ninja-build patchelf        \
                           pkgconf-pkg-config python3-devel xxd
             else
-                $SUDO_CMD $DNF_CMD install -y automake cmake doxygen    \
-                          gcc gfortran g++ git git-lfs libtool          \
+                $SUDO_CMD $DNF_CMD install -y automake cmake ccache     \
+                          doxygen gcc gfortran g++ git git-lfs libtool  \
                           libquadmath-devel mesa-libEGL-devel patchelf  \
                           ninja-build pkgconf-pkg-config python3-devel  \
                           xxd
             fi
             ;;
-        debian)
+        debian|ubuntu)
             if command -v gcc >/dev/null                                \
                     && command -v g++ >/dev/null                        \
                     && command -v gfortran >/dev/null; then
-                $SUDO_CMD $APT_CMD install -y automake cmake doxygen    \
-                          git git-lfs libegl1-mesa-dev  libquadmath0    \
-                          libtool libtool-bin ninja-build patchelf      \
+                $SUDO_CMD $APT_CMD install -y automake cmake ccache     \
+                          doxygen git git-lfs libegl1-mesa-dev libtool  \
+                          libquadmath0 libtool-bin ninja-build patchelf \
                           pkgconf python3-dev xxd
             else
-                $SUDO_CMD $APT_CMD install -y automake cmake doxygen    \
-                          gcc gfortran g++ git git-lfs libquadmath0     \
-                          libegl1-mesa-dev libtool libtool-bin          \
+                $SUDO_CMD $APT_CMD install -y automake cmake ccache     \
+                          doxygen gcc gfortran g++ git git-lfs libtool  \
+                          libquadmath0 libegl1-mesa-dev libtool-bin     \
                           ninja-build patchelf pkgconf python3-dev      \
                           xxd
             fi
@@ -164,9 +164,9 @@ setup-rocm-environment ()
     fi
 
     pushd ./TheRock >/dev/null
-    set-alternatives gcc /usr/bin/x86_64-linux-gnu-gcc-14 || return $?
-    set-alternatives g++ /usr/bin/x86_64-linux-gnu-g++-14 || return $?
-    set-alternatives gfortran /usr/bin/x86_64-linux-gnu-gfortran-14 || return $?
+    # set-alternatives gcc /usr/bin/x86_64-linux-gnu-gcc-14 || return $?
+    # set-alternatives g++ /usr/bin/x86_64-linux-gnu-g++-14 || return $?
+    # set-alternatives gfortran /usr/bin/x86_64-linux-gnu-gfortran-14 || return $?
     $PIP_CMD install -r requirements.txt
     build_tools/fetch_sources.py
     eval $(build_tools/setup_ccache.py)
