@@ -1,0 +1,78 @@
+#!/usr/bin/env bash
+#
+# @(#) install-ucx
+#
+setup-rocm ()
+{
+    local rocm_root=$1
+    local release_url=$2
+
+    if command -v rocminfo; then
+        return
+    fi
+
+    sudo install -d -m 0755 "$rocm_root" || return $?
+    curl -sSL "$release_url" |
+        gzip -d - |
+        sudo tar -C "$rocm_root" -xf -
+}
+
+clone-repo ()
+{
+    local repo_url=$1
+    local srcdir=$2
+
+    git -C "${srcdir%/*}" clone "$repo_url" "${srcdir##*/}"
+}
+
+build-ucx ()
+{
+    local srcdir=$1
+    local install_prefix=$2
+
+    local builddir=${srcdir}/build
+
+    mkdir "$builddir" || return $?
+
+    pushd "$srcdir" >/dev/null
+    ./autogen.sh
+
+    pushd "$builddir" >/dev/null
+    popd +1 >/dev/null
+    ../configure  \
+        --prefix="$install_prefix" \
+        --with-rocm=/opt/rocm \
+        --without-knem \
+        --disable-logging \
+        --disable-debug \
+        --disable-assertions \
+        --disable-params-check
+    make -j$(nproc)
+    popd >/dev/null
+}
+
+install-ucx ()
+{
+    local srcdir=$1
+
+    local builddir=${srcdir}/build
+
+    pushd "$builddir" >/dev/null
+    sudo make install
+    popd >/dev/null
+}
+
+if test ."$0" = ."${BASH_SOURCE[0]}"; then
+    set -o pipefail
+
+    declare rocm_root=${1:-'/opt/rocm'}
+    declare ucx_root=${2:-'/usr/local'}
+
+    declare rocm_release_url='https://repo.amd.com/rocm/tarball/therock-dist-linux-gfx1151-7.9.0rc1.tar.gz'
+    declare ucx_srcdir=${PWD}/ucx
+
+    setup-rocm "$rocm_root" "$rocm_release_url" || exit $?
+    clone-repo "$rocm_release_url" "$ucx_srcdir" || exit $?
+    build-ucx "$ucx_srcdir" "$ucx_root" || exit $?
+    install-ucx "$ucx_srcdir" || exit $?
+fi

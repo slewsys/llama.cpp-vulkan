@@ -1,0 +1,10 @@
+/aclocal.m4
+/autom4te.cache
+/configure
+/install-sh
+/Makefile.in
+/missing
+
+# Local files
+/build
+.tool-versions

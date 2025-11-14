@@ -1,0 +1,216 @@
+#!/usr/bin/env bash
+#
+# @(#) build-rocm.sh
+#
+: ${APT_CMD:='@APT_CMD@'}
+: ${ASDF_CMD="${HOME}/bin/asdf"}
+: ${AWK_CMD:='@AWK_CMD@'}
+: ${CAT_CMD:='@CAT_CMD@'}
+: ${CMAKE_CMD:='@CMAKE_CMD@'}
+: ${DNF_CMD:='@DNF_CMD@'}
+: ${ED_CMD:='@ED_CMD@'}
+: ${GIT_CMD:='@GIT_CMD@'}
+: ${GREP_CMD:='@GREP_CMD@'}
+: ${MAKE_CMD:='@MAKE_CMD@'}
+: ${PATCH_CMD:='@PATCH_CMD@'}
+: ${PIP_CMD:="${HOME}/.asdf/shims/pip"}
+: ${READLINK_CMD:='@READLINK_CMD@'}
+: ${RM_CMD:='@RM_CMD@'}
+: ${SUDO_CMD:='@SUDO_CMD@'}
+: ${TAIL_CMD:='@TAIL_CMD@'}
+: ${UPDATE_ALTERNATIVES_CMD:='@UPDATE_ALTERNATIVES_CMD@'}
+
+: ${INSTALL_PREFIX:='/usr/local'}
+
+# OS-agnstoic readlink for existent files/directories.
+resolve-existing ()
+{
+    if $READLINK_CMD --version 2>&1 | $GREP_CMD -q 'coreutils'; then
+        $READLINK_CMD -e "$@"
+    else
+        $READLINK_CMD -f N "$@"
+    fi
+}
+
+set-alternatives ()
+{
+    local name=$1
+    local path=$2
+
+    if command -v "$UPDATE_ALTERNATIVES_CMD" >/dev/null; then
+        source /etc/os-release
+
+        case $ID in
+            fedora)
+                if $UPDATE_ALTERNATIVES_CMD --list |
+                        $AWK_CMD '{ print $1 }' |
+                        $GREP_CMD -q "^${name}\>" &&
+                        test -f "$path"; then
+                    $SUDO_CMD $UPDATE_ALTERNATIVES_CMD --set "$name" "$path"
+                fi
+                ;;
+            debian)
+                if $UPDATE_ALTERNATIVES_CMD --get-selections |
+                        $AWK_CMD '{ print $1 }' |
+                        $GREP_CMD -q "^${name}\>" &&
+                        test -f "$path"; then
+                    $SUDO_CMD $UPDATE_ALTERNATIVES_CMD --set "$name" "$path"
+                fi
+                ;;
+        esac
+    fi
+}
+
+verify-python ()
+{
+    local version=$1
+
+    pushd "$script_dir" >/dev/null || return $?
+
+    if ! command -v "$ASDF_CMD" >/dev/null && test -x "${HOME}/bin/asdf"; then
+        export PATH=${PATH}:${HOME}/bin
+    fi
+
+    if command -v "$ASDF_CMD" >/dev/null; then
+        if [[ ! ."$PATH" =~ ^\..*\.asdf/shims ]]; then
+            export PATH=${HOME}/.asdf/shims:${PATH}
+        fi
+
+        python_available=$(
+            $ED_CMD -s <($ASDF_CMD list) <<EOF | $TAIL_CMD -1
+g/^python/1,.d
+g/^[a-z]/.,$d
+,!$GREP_CMD "$version"
+p
+Q
+EOF
+                        ) || return $?
+
+        case "$python_available" in
+            *'*'${version}*)
+                : Nothing to do
+                ;;
+            *${version}*)
+                echo "python${python_available}" >>${script_dir}/.tool-versions
+                ;;
+            *)
+                $ASDF_CMD plugin add python || return $?
+                latest=$(eval $ASDF_CMD latest python "$version")
+                $ASDF_CMD install python "$latest" || return $?
+                $ASDF_CMD set python "$latest" || return $?
+                ;;
+        esac
+    else
+        ${script_dir}/scripts/install-asdf || return $?
+        $ASDF_CMD plugin add python || return $?
+        latest=$(eval $ASDF_CMD latest python "$version")
+        $ASDF_CMD install python "$latest" || return $?
+        $ASDF_CMD set python "$latest" || return $?
+        $ASDF_CMD reshim python || return $?
+
+        export PATH=${HOME}/.asdf/shims:${PATH}:${HOME}/bin
+    fi
+
+    popd >/dev/null || return $?
+}
+
+install-prerequisites ()
+{
+    source /etc/os-release
+
+    case "$ID" in
+        fedora)
+            if command -v gcc >/dev/null                                \
+                    && command -v g++ >/dev/null                        \
+                    && command -v gfortran >/dev/null; then
+                $SUDO_CMD $DNF_CMD install -y automake cmake doxygen    \
+                          git git-lfs libquadmath-devel libtool         \
+                          mesa-libEGL-devel ninja-build patchelf        \
+                          pkgconf-pkg-config python3-devel xxd
+            else
+                $SUDO_CMD $DNF_CMD install -y automake cmake doxygen    \
+                          gcc gfortran g++ git git-lfs libtool          \
+                          libquadmath-devel mesa-libEGL-devel patchelf  \
+                          ninja-build pkgconf-pkg-config python3-devel  \
+                          xxd
+            fi
+            ;;
+        debian)
+            if command -v gcc >/dev/null                                \
+                    && command -v g++ >/dev/null                        \
+                    && command -v gfortran >/dev/null; then
+                $SUDO_CMD $APT_CMD install -y automake cmake doxygen    \
+                          git git-lfs libegl1-mesa-dev  libquadmath0    \
+                          libtool libtool-bin ninja-build patchelf      \
+                          pkgconf python3-dev xxd
+            else
+                $SUDO_CMD $APT_CMD install -y automake cmake doxygen    \
+                          gcc gfortran g++ git git-lfs libquadmath0     \
+                          libegl1-mesa-dev libtool libtool-bin          \
+                          ninja-build patchelf pkgconf python3-dev      \
+                          xxd
+            fi
+            ;;
+    esac
+}
+
+setup-rocm-environment ()
+{
+    if test -d ./TheRock; then
+        $GIT_CMD -C ./TheRock pull --rebase || return $?
+    else
+        # $GIT_CMD clone --single-branch --filter=tree:0 https://github.com/ROCm/TheRock.git
+        $GIT_CMD clone https://github.com/ROCm/TheRock.git || return $?
+    fi
+
+    pushd ./TheRock >/dev/null
+    set-alternatives gcc /usr/bin/x86_64-linux-gnu-gcc-14 || return $?
+    set-alternatives g++ /usr/bin/x86_64-linux-gnu-g++-14 || return $?
+    set-alternatives gfortran /usr/bin/x86_64-linux-gnu-gfortran-14 || return $?
+    $PIP_CMD install -r requirements.txt
+    build_tools/fetch_sources.py
+    eval $(build_tools/setup_ccache.py)
+    export CCACHE_SLOPPINESS=include_file_ctime
+    popd >/dev/null
+}
+
+build-rocm ()
+{
+    echo "*** CMake configuration of TheRock ***" >&2
+
+    pushd ./TheRock >/dev/null
+    $CMAKE_CMD -B build \
+               -GNinja \
+               -DCMAKE_INSTALL_PREFIX=/usr/local \
+               -DTHEROCK_AMDGPU_TARGETS=gfx1151 \
+               -DTHEROCK_ENABLE_MPI=ON \
+               -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+               -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+               .
+
+    echo "*** CMake build of TheRock ***" >&2
+
+    $CMAKE_CMD --build build
+    popd >/dev/null
+
+    # set-alternatives gcc /usr/bin/x86_64-linux-gnu-gcc-14 || return $?
+    # set-alternatives g++ /usr/bin/x86_64-linux-gnu-g++-14 || return $?
+    # set-alternatives gfortran /usr/bin/x86_64-linux-gnu-gfortran-14 || return $?
+}
+
+if test ."$0" = ."${BASH_SOURCE[0]}"; then
+    declare script=''
+    declare script_dir=''
+    declare script_name=''
+
+    script=$(resolve-existing "$0") || exit $?
+    script_name=${script##*/}
+    script_dir=${script%/*}
+
+    declare py_version='3\.12'
+
+    verify-python "$py_version" || exit $?
+    install-prerequisites || exit $?
+    setup-rocm-environment || exit $?
+    build-rocm || exit $?
+fi

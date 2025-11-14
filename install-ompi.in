@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+#
+# @(#) install-ompi
+#
+recursively-clone-repo ()
+{
+    local repo_url=$1
+    local srcdir=$2
+
+    git -C "${srcdir%/*}" clone \
+        --recurse-submodules "$repo_url" "${srcdir##*/}"
+}
+
+build-ompi ()
+{
+    local srcdir=$1
+    local rocm_root=$2
+    local ucx_root=$3
+    local ompi_root=$4
+
+    local builddir=${srcdir}/build
+
+    mkdir "$builddir" || return $?
+
+    pushd "$srcdir" >/dev/null
+    ./autogen.pl
+
+    pushd "$builddir" >/dev/null
+    popd +1 >/dev/null
+    CFLAGS='-Wl,-rpath=/usr/local/lib' ../configure \
+          --prefix="$ompi_root" \
+          --with-rocm="$rocm_root" \
+          --with-ucx="$ucx_root" \
+          --with-ucx-libdir="${ucx_root}/lib" \
+          --enable-mca-no-build=btl-uct \
+        || return $?
+    make || return $?
+    popd >/dev/null
+}
+
+install-ompi ()
+{
+    local srcdir=$1
+
+    local builddir=${srcdir}/build
+
+    pushd "$builddir" >/dev/null
+    sudo make install || return $?
+    popd >/dev/null
+}
+
+if test ."$0" == ."${BASH_SOURCE[0]}"; then
+    declare ucx_root=${1:-/usr/local}
+    declare ompi_root=${2:-/usr/local}
+    declare rocm_root=${3:-/opt/rocm}
+
+    declare ompi_repo_url='https://github.com/open-mpi/ompi.git'
+    declare ompi_srcdir=${PWD}/ompi
+
+    if ! command -v ucx_info; then
+        ./install-ucx "$rocm_root" "$ucx_root"
+        export PATH=${ucx_root}/bin:${PATH}
+    fi
+
+    if ! command rocm-smi; then
+        export PATH=${rocm_root}/bin:${PATH}
+    fi
+
+    recursively-clone-repo "$ompi_repo_url" "$ompi_srcdir" || exit $?
+    build-ompi "$ompi_srcdir" "$rocm_root" "$ucx_root" "$ompi_root" || exit $?
+    install-ompi "$ompi_srcdir" || exit $?
+fi
