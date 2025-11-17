@@ -4,17 +4,10 @@
 #
 setup-rocm ()
 {
-    local rocm_root=$1
-    local release_url=$2
+    local rocm_target=$1
+    local rocm_root=$2
 
-    if command -v rocminfo; then
-        return
-    fi
-
-    sudo install -d -m 0755 "$rocm_root" || return $?
-    curl -b .cookies -c .cookies -sSL "$release_url" |
-        gzip -d - |
-        sudo tar -C "$rocm_root" -xf -
+    "${script_dir}/install-rocm-binaries" "$rocm_target" "$rocm_root"
 }
 
 clone-repo ()
@@ -23,6 +16,14 @@ clone-repo ()
     local srcdir=$2
 
     git -C "${srcdir%/*}" clone "$repo_url" "${srcdir##*/}"
+}
+
+patch-repo ()
+{
+    local srcdir=$1
+    local patch_file=$2
+
+    git -C "$srcdir" apply "$patch_file"
 }
 
 build-ucx ()
@@ -42,6 +43,7 @@ build-ucx ()
     CFLAGS='-Wl,-rpath=/usr/local/lib' ../configure  \
         --prefix="$install_prefix" \
         --with-rocm=/opt/rocm \
+        --with-go=$(command -v go) \
         --without-knem \
         --disable-logging \
         --disable-debug \
@@ -65,15 +67,25 @@ install-ucx ()
 if test ."$0" = ."${BASH_SOURCE[0]}"; then
     set -o pipefail
 
-    declare rocm_root=${1:-'/opt/rocm'}
-    declare ucx_root=${2:-'/usr/local'}
+    declare script=''
+    declare script_name=''
+    declare script_dir=''
 
-    declare rocm_release_url='https://repo.amd.com/rocm/tarball/therock-dist-linux-gfx1151-7.9.0rc1.tar.gz'
+    script=$(readlink -e "$0")
+    script_name=${script##*/}
+    script_dir=${script%/*}
+
+    declare rocm_target=${1:-'gfx1151'}
+    declare rocm_root=${2:-'/opt/rocm'}
+    declare ucx_root=${3:-'/usr/local'}
+
     declare ucx_repo_url='https://github.com/openucx/ucx.git'
     declare ucx_srcdir=${PWD}/ucx
+    declare top_srcdir=$(git rev-parse --show-toplevel)
 
-    setup-rocm "$rocm_root" "$rocm_release_url" || exit $?
+    setup-rocm "$rocm_target" "$rocm_root" || exit $?
     clone-repo "$ucx_repo_url" "$ucx_srcdir" || exit $?
+    patch-repo "$ucx_srcdir" "${top_srcdir}/patches/patch-ucx.diff" || exit $?
     build-ucx "$ucx_srcdir" "$ucx_root" || exit $?
     install-ucx "$ucx_srcdir" || exit $?
 fi

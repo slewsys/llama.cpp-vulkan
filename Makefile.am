@@ -7,9 +7,12 @@ BUILD_DIR := $(dir $(realpath $(lastword $(MAKEFILE_LIST))))
 bin_SCRIPTS = install-llama.cpp-rocm
 EXTRA_DIST = build-llama.cpp-rocm.in \
 	     install-asdf.in \
+	     build-rocm.in \
 	     install-intel-oneapi-hpc.in \
 	     install-llama.cpp-rocm.in \
-	     install-nvidia-rocm.in
+	     install-ucx.in \
+	     install-ompi.in \
+	     install-rocm-binaries.in
 
 AM_DEFAULT_SOURCE_EXT = .in
 
@@ -18,7 +21,11 @@ AM_DEFAULT_SOURCE_EXT = .in
 
 all: llama.cpp-rocm
 
-llama.cpp-rocm: build-llama.cpp-rocm
+llama.cpp-rocm: build-llama.cpp-rocm build-rocm install-rocm-binaries
+	$(BUILD_DIR)install-rocm-binaries
+	$(BUILD_DIR)install-ucx
+	$(BUILD_DIR)install-ompi
+	$(BUILD_DIR)build-rocm
 	$(BUILD_DIR)build-llama.cpp-rocm $(abs_srcdir)
 
 install: install-exec-local
@@ -27,14 +34,14 @@ install-exec-local: install-llama.cpp-rocm
 	$(BUILD_DIR)install-llama.cpp-rocm
 
 clean:
-	rm -rf llama.cpp
+	rm -rf ucx ompi TheRock
 
-build-llama.cpp-rocm: build-llama.cpp-rocm.in
+build-llama.cpp-rocm: $(top_srcdir)build-llama.cpp-rocm.in
 
-install-asdf: install-asdf.in
+install-asdf: $(top_srcdir)install-asdf.in
 
-install-llama.cpp-rocm: install-llama.cpp-rocm.in
+install-llama.cpp-rocm: $(top_srcdir)install-llama.cpp-rocm.in
 
-install-intel-oneapi-hpc: install-intel-oneapi-hpc.in
+install-intel-oneapi-hpc: $(top_srcdir)install-intel-oneapi-hpc.in
 
-install-nvidia-rocm: install-nvidia-rocm.in
+install-rocm-binaries: $(top_srcdir)install-rocm-binaries.in
