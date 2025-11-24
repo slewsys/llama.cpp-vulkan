@@ -15,7 +15,12 @@ clone-repo ()
     local repo_url=$1
     local srcdir=$2
 
-    git -C "${srcdir%/*}" clone "$repo_url" "${srcdir##*/}"
+    if test -d "${srcdir}/.git"; then
+        git -C "$srcdir" pull --rebase
+    else
+        install -d -m 0755 "${srcdir%/*}"
+        git -C "${srcdir%/*}" clone "$repo_url" "${srcdir##*/}"
+    fi
 }
 
 patch-repo ()
@@ -23,7 +28,10 @@ patch-repo ()
     local srcdir=$1
     local patch_file=$2
 
-    git -C "$srcdir" apply "$patch_file"
+    git -C "$srcdir" apply --index "$patch_file"
+
+    echo 'Git commit: Add golang path.'
+    git -C "$srcdir" commit -m 'Assign golang path.'
 }
 
 build-ucx ()
@@ -41,14 +49,16 @@ build-ucx ()
     pushd "$builddir" >/dev/null
     popd +1 >/dev/null
     CFLAGS='-Wl,-rpath=/usr/local/lib' ../configure  \
-        --prefix="$install_prefix" \
-        --with-rocm=/opt/rocm \
-        --with-go=$(command -v go) \
-        --without-knem \
-        --disable-logging \
-        --disable-debug \
-        --disable-assertions \
-        --disable-params-check
+          --prefix="$install_prefix" \
+          --libdir="${install_prefix}/lib" \
+          --with-rocm=/opt/rocm \
+          --with-go=$(command -v go) \
+          --without-knem \
+          --disable-logging \
+          --disable-debug \
+          --disable-assertions \
+          --disable-params-check
+    make clean
     make -j$(nproc)
     popd >/dev/null
 }
@@ -59,9 +69,7 @@ install-ucx ()
 
     local builddir=${srcdir}/build
 
-    pushd "$builddir" >/dev/null
-    sudo make install
-    popd >/dev/null
+    sudo -i make -C "$builddir" install
 }
 
 if test ."$0" = ."${BASH_SOURCE[0]}"; then
@@ -80,7 +88,7 @@ if test ."$0" = ."${BASH_SOURCE[0]}"; then
     declare ucx_root=${3:-'/usr/local'}
 
     declare ucx_repo_url='https://github.com/openucx/ucx.git'
-    declare ucx_srcdir=${PWD}/ucx
+    declare ucx_srcdir=${PWD}/src/ucx
     declare top_srcdir=$(git rev-parse --show-toplevel)
 
     setup-rocm "$rocm_target" "$rocm_root" || exit $?
