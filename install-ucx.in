@@ -94,7 +94,7 @@ if test ."$0" = ."${BASH_SOURCE[0]}"; then
 
     setup-rocm "$rocm_target" "$rocm_root" || exit $?
     clone-repo "$ucx_repo_url" "$ucx_srcdir" || exit $?
-    patch-repo "$ucx_srcdir" "${top_srcdir}/patches/patch-ucx.diff" || exit $?
+    patch-repo "$ucx_srcdir" "${top_srcdir}/patches/ucx/patch-ucx.diff" || exit $?
     build-ucx "$ucx_srcdir" "$ucx_root" || exit $?
     install-ucx "$ucx_srcdir" || exit $?
 fi
