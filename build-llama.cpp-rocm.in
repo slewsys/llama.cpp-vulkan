@@ -18,6 +18,7 @@
 : ${GIT_CMD:='@GIT_CMD@'}
 : ${GREP_CMD:='@GREP_CMD@'}
 : ${MAKE_CMD:='@MAKE_CMD@'}
+: ${NPROC_CMD:='@NPROC_CMD@'}
 : ${PATCH_CMD:='@PATCH_CMD@'}
 : ${PIP_CMD:="${HOME}/.asdf/shims/pip"}
 : ${READLINK_CMD:='@READLINK_CMD@'}
@@ -27,7 +28,11 @@
 : ${TEE_CMD:='@TEE_CMD@'}
 
 : ${INSTALL_PREFIX:='/usr/local'}
+: ${AMDGPU_TARGET:='gfx1151'}
+: ${ONEAPI_ROOT:='/opt/intel/oneapi'}
 : ${ROCM_ROOT:='/opt/rocm'}
+: ${OMPI_ROOT:='/usr/local'}
+: ${UCX_ROOT:='/usr/local'}
 
 # OS-agnstoic readlink for existent files/directories.
 resolve-existing ()
@@ -56,26 +61,39 @@ set-alternatives ()
 
 check-oneapi-env ()
 {
-    if test ."$ONEAPI_ROOT" = .''; then
-        if test ! -d /opt/intel/oneapi; then
-            $SUDO_CMD -i ${script_dir}/install-intel-oneapi-hpc || return $?
-        fi
+    local oneapi_root=$1
+
+    if test ! -d "$oneapi_root"; then
+        $SUDO_CMD -i ${script_dir}/install-intel-oneapi-hpc || return $?
+    fi
+
+    if ! command -v icx >/dev/null; then
         source /opt/intel/oneapi/setvars.sh
     fi
 }
 
 check-rocm-env ()
 {
-    if test ! -d "${ROCM_ROOT}/bin"; then
-        $SUDO_CMD -i ${script_dir}/install-rocm-binaries || return $?
+    local amdgpu_target=$1
+    local ucx_root=$2
+    local ompi_root=$3
+    local rocm_root=$4
+
+    if test ! -d "${rocm_root}/bin"; then
+        $SUDO_CMD -i ${script_dir}/install-rocm-binaries \
+                  "$amdgpu_target" \
+                  "$ucx_root" \
+                  "$ompi_root" \
+                  "$rocm_root" \
+            || return $?
     fi
 
-    if ! $GREP_CMD -q cuda <<<$PATH; then
-        export PATH=/usr/local/cuda/bin:${PATH}
+    if ! $GREP_CMD -q rocm <<<$PATH; then
+        export PATH=${rocm_root}/bin:${PATH}
     fi
 
     if ! command -v rocminfo >/dev/null; then
-        echo 'Error: ROCm installation not found in /opt/rocm/' >&2
+        echo "Error: ROCm installation not found in ${ROCM_ROOT}" >&2
         return 1
     fi
 }
@@ -138,10 +156,10 @@ clone-repo ()
     local srcdir=$2
 
     if test -d "${srcdir}/.git"; then
-        git -C "$srcdir" pull --rebase || return $?
+        $GIT_CMD -C "$srcdir" pull --rebase || return $?
     else
-        install -d -m 0755 "${srcdir%/*}" || return $?
-        git -C "${srcdir%/*}" clone "$repo_url" "${srcdir##*/}" || return $?
+        $INSTALL_CMD -d -m 0755 "${srcdir%/*}" || return $?
+        $GIT_CMD -C "${srcdir%/*}" clone "$repo_url" "${srcdir##*/}" || return $?
     fi
 }
 
@@ -154,25 +172,24 @@ patch-repo ()
 
     up_to_date=$(
         $GIT_CMD -C "$srcdir" log \
-                 --pretty=reference --grep 'Update Python requirements.'
+                 --pretty=reference --grep 'Assign golang path.'
            ) || return $?
 
-    if test -z "$up_to_date"; then
-        local patchfile=''
-
-        for patchfile in "${patchdir}/"*.diff; do
-            $PATCH_CMD -d "$srcdir" <"$patchfile" || return $?
-        done
-
-        $CAT_CMD >&2 <<'EOF'
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-!! Enter git credentials for commit: 'Update Python requirements.': !!
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-EOF
-        $GIT_CMD -C "$srcdir" commit -a -m 'Update Python requirements.'
+    if test ."$up_to_date" != .''; then
+        return 0
     fi
+    local patchfile=''
 
-    $PIP_CMD install -U -r "${srcdir}/requirements.txt" || return $?
+    for patchfile in "${patchdir}/"*.diff; do
+        $PATCH_CMD -d "$srcdir" <"$patchfile" || return $?
+    done
+
+    $CAT_CMD >&2 <<'EOF'
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!! Enter git credentials for commit: 'Assign golang path.': !!
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+EOF
+    $GIT_CMD -C "$srcdir" commit -a -m 'Assign golang path.'
 }
 
 build-llama.cpp ()
@@ -185,19 +202,21 @@ build-llama.cpp ()
     HIPCXX="$(hipconfig -l)/clang" \
           HIP_PATH="$(hipconfig -R)" \
           HIP_PLATFORM=amd \
-          $CMAKE_CMD -B "$builddir" \
-          -DCMAKE_INSTALL_PREFIX="${INSTALL_PREFIX}" \
-          -DCMAKE_INSTALL_RPATH="${INSTALL_PREFIX}/lib64;${ONEAPI_ROOT}/compiler/latest/lib;${ONEAPI_ROOT}/mkl/latest/lib" \
-          -DGGML_HIP=ON \
-          -DGGML_HIP_ROCWMMA_FATTN=ON \
-          -DAMDGPU_TARGETS=gfx1151 \
-          -DCMAKE_BUILD_TYPE=Release \
-          -DGGML_BLAS=ON \
-          -DGGML_BLAS_VENDOR=Intel10_64lp \
-          -DCMAKE_C_COMPILER=icx \
-          -DCMAKE_CXX_COMPILER=icpx \
-          -DGGML_NATIVE=ON \
-          -DLLAMA_CURL=ON \
+          $CMAKE_CMD \
+              -S "$srcdir" \
+              -B "$builddir" \
+              -DCMAKE_INSTALL_PREFIX="${INSTALL_PREFIX}" \
+              -DCMAKE_INSTALL_RPATH="${INSTALL_PREFIX}/lib64;${ONEAPI_ROOT}/compiler/latest/lib;${ONEAPI_ROOT}/mkl/latest/lib" \
+              -DGGML_HIP=ON \
+              -DGGML_HIP_ROCWMMA_FATTN=ON \
+              -DAMDGPU_TARGETS=gfx1151 \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DGGML_BLAS=ON \
+              -DGGML_BLAS_VENDOR=Intel10_64lp \
+              -DCMAKE_C_COMPILER=icx \
+              -DCMAKE_CXX_COMPILER=icpx \
+              -DGGML_NATIVE=ON \
+              -DLLAMA_CURL=ON \
         || return $?
 
 # OneAPI CMake options
@@ -208,7 +227,8 @@ build-llama.cpp ()
 #               -DCMAKE_CXX_COMPILER=icpx \
 #               -DGGML_NATIVE=ON \
 
-    $MAKE_CMD -C "$builddir" -j60 |& $TEE_CMD "${builddir}/build.OUT"
+    $MAKE_CMD -C "$builddir" -j$($NPROC_CMD) |&
+        $TEE_CMD "${builddir}/build.OUT"
 }
 
 if test ."$0" = ."${BASH_SOURCE[0]}"; then
@@ -232,6 +252,11 @@ if test ."$0" = ."${BASH_SOURCE[0]}"; then
               ) || true
 
     declare abs_srcdir=${1:-"$top_srcdir"}
+    declare amdgpu_target=${2:-"$AMDGPU_TARGET"}
+    declare rocm_root=${3:-"$ROCM_ROOT"}
+    declare ompi_root=${4:-"$OMPI_ROOT"}
+    declare ucx_root=${5:-"$UCX_ROOT"}
+    declare oneapi_root=${6:-"$ONEAPI_ROOT"}
 
     declare llama_repo_url='https://github.com/ggml-org/llama.cpp.git'
     declare llama_srcdir=${script_dir}/src/llama.cpp
@@ -240,8 +265,9 @@ if test ."$0" = ."${BASH_SOURCE[0]}"; then
 
     echo "Building llama.cpp with ROCm and Intel cuBLAS support" >&2
 
-    check-oneapi-env || exit $?
-    check-rocm-env || exit $?
+    check-oneapi-env "$oneapi_root" || exit $?
+    check-rocm-env "$amdgpu_target" "$ucx_root" "$ompi_root" "$rocm_root" \
+        || exit $?
     verify-python "$py_version" || exit $?
     clone-repo "$llama_repo_url" "$llama_srcdir" || exit $?
     # patch-repo "$llama_srcdir" "$llama_patchdir" || exit $?

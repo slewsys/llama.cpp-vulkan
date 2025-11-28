@@ -49,12 +49,15 @@ AC_PATH_PROGS([GREP_CMD],       [ggrep grep],          [], [${OPT_PREFIX}${PATH}
 AC_PATH_PROGS([GZIP_CMD],       [ggzip gzip],          [], [${OPT_PREFIX}${PATH}])
 AC_PATH_PROGS([HEAD_CMD],       [ghead head],          [], [${OPT_PREFIX}${PATH}])
 
-AC_PATH_PROGS([HTMLQ_CMD],      [htmlq],               [], [${ASDF_PREFIX}${PATH}])
+AC_PATH_PROG([HTMLQ_CMD],       [htmlq],               [], [${ASDF_PREFIX}${PATH}])
 
-AC_PATH_PROGS([MAKE_CMD],       [gmake make],          [], [${OPT_PREFIX}${PATH}])
-AC_PATH_PROGS([MKDIR_CMD],      [gmkdir mkdir],        [], [${OPT_PREFIX}${PATH}])
 AC_PATH_PROGS([INSTALL_CMD],    [ginstall install],    [], [${OPT_PREFIX}${PATH}])
 
+AC_PATH_PROGS([LN_CMD],         [gln ln],              [], [${OPT_PREFIX}${PATH}])
+AC_PATH_PROGS([MAKE_CMD],       [gmake make],          [], [${OPT_PREFIX}${PATH}])
+AC_PATH_PROGS([MKDIR_CMD],      [gmkdir mkdir],        [], [${OPT_PREFIX}${PATH}])
+
+AC_PATH_PROG([NPROC_CMD],       [nproc],               [], [${OPT_PREFIX}${PATH}])
 AC_PATH_PROG([JQ_CMD],          [jq],                  [], [${OPT_PREFIX}${PATH}])
 AC_PATH_PROG([PATCH_CMD],       [patch],               [], [${OPT_PREFIX}${PATH}])
 AC_PATH_PROG([PIP_CMD],         [pip],                 [], [${ASDF_PREFIX}${PATH}])

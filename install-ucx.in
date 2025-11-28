@@ -2,12 +2,31 @@
 #
 # @(#) install-ucx
 #
-setup-rocm ()
-{
-    local rocm_target=$1
-    local rocm_root=$2
+: ${CAT_CMD:='@CAT_CMD@'}
+: ${GIT_CMD:='@GIT_CMD@'}
+: ${INSTALL_CMD:='@INSTALL_CMD@'}
+: ${MAKE_CMD:='@MAKE_CMD@'}
+: ${NPROC_CMD:='@NPROC_CMD@'}
+: ${PATCH_CMD:='@PATCH_CMD@'}
+: ${READLINK_CMD:='@READLINK_CMD@'}
+: ${SUDO_CMD:='@SUDO_CMD@'}
+: ${TEE_CMD:='@TEE_CMD@'}
 
-    "${script_dir}/install-rocm-binaries" "$rocm_target" "$rocm_root"
+: ${ROCM_ROOT:='/opt/rocm'}
+: ${UCX_ROOT:='/usr/local'}
+
+check-rocm-env ()
+{
+    local rocm_root=$1
+
+    if ! command -v "${rocm_root}/bin/rocminfo" >/dev/null; then
+        echo "${script_name}: ROCM installation not found in ${rocm_root}" >&2
+        return 1
+    fi
+
+    if ! $GREP_CMD -q "${rocm_root}/bin" <<<$PATH; then
+        export PATH=${rocm_root}/bin:${PATH}
+    fi
 }
 
 clone-repo ()
@@ -16,22 +35,40 @@ clone-repo ()
     local srcdir=$2
 
     if test -d "${srcdir}/.git"; then
-        git -C "$srcdir" pull --rebase || return $?
+        $GIT_CMD -C "$srcdir" pull --rebase || return $?
     else
-        install -d -m 0755 "${srcdir%/*}" || return $?
-        git -C "${srcdir%/*}" clone "$repo_url" "${srcdir##*/}" || return $?
+        $INSTALL_CMD -d -m 0755 "${srcdir%/*}" || return $?
+        $GIT_CMD -C "${srcdir%/*}" clone "$repo_url" "${srcdir##*/}" || return $?
     fi
 }
 
 patch-repo ()
 {
     local srcdir=$1
-    local patch_file=$2
+    local patchdir=$2
 
-    if git -C "$srcdir" apply --index "$patch_file"; then
-        echo 'Git commit: Add golang path.'
-        git -C "$srcdir" commit -m 'Assign golang path.'
+    local up_to_date=''
+
+    up_to_date=$(
+        $GIT_CMD -C "$srcdir" log \
+                 --pretty=reference --grep 'Assign golang path.'
+           ) || return $?
+
+    if test ."$up_to_date" != .''; then
+        return 0
     fi
+    local patchfile=''
+
+    for patchfile in "${patchdir}/"*.diff; do
+        $PATCH_CMD -p1 -d "$srcdir" <"$patchfile" || return $?
+    done
+
+    $CAT_CMD >&2 <<'EOF'
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!! Enter git credentials for commit: 'Assign golang path.': !!
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+EOF
+    $GIT_CMD -C "$srcdir" commit -a -m 'Assign golang path.'
 }
 
 build-ucx ()
@@ -41,7 +78,7 @@ build-ucx ()
 
     local builddir=${srcdir}/build
 
-    install -d -m 0755 "$builddir" || return $?
+    $INSTALL_CMD -d -m 0755 "$builddir" || return $?
 
     pushd "$srcdir" >/dev/null
     ./autogen.sh || return $?
@@ -52,15 +89,19 @@ build-ucx ()
           --prefix="$install_prefix" \
           --libdir="${install_prefix}/lib" \
           --with-rocm=/opt/rocm \
+          --enable-mt \
           --with-go=$(command -v go) \
           --without-knem \
           --disable-logging \
           --disable-debug \
           --disable-assertions \
           --disable-params-check \
+          --with-avx \
+          --with-sse42 \
         || return $?
-    make clean || return $?
-    make -j$(nproc) | tee "${builddir}/build.OUT" || return $?
+    $MAKE_CMD clean || return $?
+    $MAKE_CMD -j$($NPROC_CMD) |&
+        $TEE_CMD "${builddir}/build.OUT" || return $?
     popd >/dev/null
 }
 
@@ -70,7 +111,7 @@ install-ucx ()
 
     local builddir=${srcdir}/build
 
-    sudo -i make -C "$builddir" install
+    $SUDO_CMD -i $MAKE_CMD -C "$builddir" install
 }
 
 if test ."$0" = ."${BASH_SOURCE[0]}"; then
@@ -80,21 +121,28 @@ if test ."$0" = ."${BASH_SOURCE[0]}"; then
     declare script_name=''
     declare script_dir=''
 
-    script=$(readlink -e "$0") || exit $?
+    script=$($READLINK_CMD -e "$0") || exit $?
     script_name=${script##*/}
     script_dir=${script%/*}
 
-    declare rocm_target=${1:-'gfx1151'}
-    declare rocm_root=${2:-'/opt/rocm'}
-    declare ucx_root=${3:-'/usr/local'}
+    declare rocm_root=${1:-"$ROCM_ROOT"}
+    declare ucx_root=${2:-"$UCX_ROOT"}
 
     declare ucx_repo_url='https://github.com/openucx/ucx.git'
     declare ucx_srcdir=${script_dir}/src/ucx
-    declare top_srcdir=$(git rev-parse --show-toplevel)
+    declare top_srcdir=''
 
-    setup-rocm "$rocm_target" "$rocm_root" || exit $?
+    top_srcdir=$(
+        cd "$script_dir" && $GIT_CMD rev-parse --show-toplevel
+              ) || exit $?
+
+    declare ucx_patchdir=${top_srcdir}/patches/ucx
+
+    echo "Building and installing UCX with ROCm support" >&2
+
+    check-rocm-env "$rocm_root" || exit $?
     clone-repo "$ucx_repo_url" "$ucx_srcdir" || exit $?
-    patch-repo "$ucx_srcdir" "${top_srcdir}/patches/ucx/patch-ucx.diff" || exit $?
+    patch-repo "$ucx_srcdir" "$ucx_patchdir" || exit $?
     build-ucx "$ucx_srcdir" "$ucx_root" || exit $?
     install-ucx "$ucx_srcdir" || exit $?
 fi
