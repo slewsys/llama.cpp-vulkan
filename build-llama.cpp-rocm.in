@@ -172,12 +172,13 @@ patch-repo ()
 
     up_to_date=$(
         $GIT_CMD -C "$srcdir" log \
-                 --pretty=reference --grep 'Assign golang path.'
+                 --pretty=reference --grep 'Update Python scripts.'
            ) || return $?
 
     if test ."$up_to_date" != .''; then
         return 0
     fi
+
     local patchfile=''
 
     for patchfile in "${patchdir}/"*.diff; do
@@ -189,12 +190,13 @@ patch-repo ()
 !! Enter git credentials for commit: 'Assign golang path.': !!
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 EOF
-    $GIT_CMD -C "$srcdir" commit -a -m 'Assign golang path.'
+    $GIT_CMD -C "$srcdir" commit -a -m 'Update Python scripts.'
 }
 
 build-llama.cpp ()
 {
     local srcdir=$1
+    local install_prefix=$2
 
     local builddir=${srcdir}/build
 
@@ -205,8 +207,8 @@ build-llama.cpp ()
           $CMAKE_CMD \
               -S "$srcdir" \
               -B "$builddir" \
-              -DCMAKE_INSTALL_PREFIX="${INSTALL_PREFIX}" \
-              -DCMAKE_INSTALL_RPATH="${INSTALL_PREFIX}/lib64;${ONEAPI_ROOT}/compiler/latest/lib;${ONEAPI_ROOT}/mkl/latest/lib" \
+              -DCMAKE_INSTALL_PREFIX="${install_prefix}" \
+              -DCMAKE_INSTALL_RPATH="${install_prefix}/lib64;${ONEAPI_ROOT}/compiler/latest/lib;${ONEAPI_ROOT}/mkl/latest/lib" \
               -DGGML_HIP=ON \
               -DGGML_HIP_ROCWMMA_FATTN=ON \
               -DAMDGPU_TARGETS=gfx1151 \
@@ -220,7 +222,7 @@ build-llama.cpp ()
         || return $?
 
 # OneAPI CMake options
-#               -DCMAKE_INSTALL_RPATH="${INSTALL_PREFIX}/lib64;${ONEAPI_ROOT}/compiler/latest/lib;${ONEAPI_ROOT}/mkl/latest/lib" \
+#               -DCMAKE_INSTALL_RPATH="${install_prefix}/lib64;${ONEAPI_ROOT}/compiler/latest/lib;${ONEAPI_ROOT}/mkl/latest/lib" \
 #               -DGGML_BLAS=ON \
 #               -DGGML_BLAS_VENDOR=Intel10_64lp \
 #               -DCMAKE_C_COMPILER=icx \
@@ -252,11 +254,12 @@ if test ."$0" = ."${BASH_SOURCE[0]}"; then
               ) || true
 
     declare abs_srcdir=${1:-"$top_srcdir"}
-    declare amdgpu_target=${2:-"$AMDGPU_TARGET"}
-    declare rocm_root=${3:-"$ROCM_ROOT"}
-    declare ompi_root=${4:-"$OMPI_ROOT"}
-    declare ucx_root=${5:-"$UCX_ROOT"}
-    declare oneapi_root=${6:-"$ONEAPI_ROOT"}
+    declare install_prefix=${2:-"$INSTALL_PREFIX"}
+    declare amdgpu_target=${3:-"$AMDGPU_TARGET"}
+    declare rocm_root=${4:-"$ROCM_ROOT"}
+    declare ompi_root=${5:-"$OMPI_ROOT"}
+    declare ucx_root=${6:-"$UCX_ROOT"}
+    declare oneapi_root=${7:-"$ONEAPI_ROOT"}
 
     declare llama_repo_url='https://github.com/ggml-org/llama.cpp.git'
     declare llama_srcdir=${script_dir}/src/llama.cpp
@@ -266,13 +269,12 @@ if test ."$0" = ."${BASH_SOURCE[0]}"; then
     echo "Building llama.cpp with ROCm and Intel cuBLAS support" >&2
 
     check-oneapi-env "$oneapi_root" || exit $?
-    check-rocm-env "$amdgpu_target" "$ucx_root" "$ompi_root" "$rocm_root" \
-        || exit $?
+    check-rocm-env "$amdgpu_target" "$ucx_root" "$ompi_root" "$rocm_root" || exit $?
     verify-python "$py_version" || exit $?
     clone-repo "$llama_repo_url" "$llama_srcdir" || exit $?
     # patch-repo "$llama_srcdir" "$llama_patchdir" || exit $?
     # set-alternatives gcc /usr/bin/x86_64-linux-gnu-gcc-15 || exit $?
     # set-alternatives g++ /usr/bin/x86_64-linux-gnu-g++-15 || exit $?
     # set-alternatives gfortran /usr/bin/x86_64-linux-gnu-gfortran-15 || exit $?
-    build-llama.cpp "$llama_srcdir" || exit $?
+    build-llama.cpp "$llama_srcdir" "$install_prefix" || exit $?
 fi
