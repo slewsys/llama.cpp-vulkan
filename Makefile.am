@@ -34,14 +34,14 @@ install-exec-local: install-llama.cpp-rocm
 	$(BUILD_DIR)install-llama.cpp-rocm
 
 clean:
-	rm -rf ucx ompi TheRock
+	rm -rf src
 
-build-llama.cpp-rocm: $(top_srcdir)build-llama.cpp-rocm.in
+build-llama.cpp-rocm: $(top_srcdir)/build-llama.cpp-rocm.in
 
-install-asdf: $(top_srcdir)install-asdf.in
+install-asdf: $(top_srcdir)/install-asdf.in
 
-install-llama.cpp-rocm: $(top_srcdir)install-llama.cpp-rocm.in
+install-llama.cpp-rocm: $(top_srcdir)/install-llama.cpp-rocm.in
 
-install-intel-oneapi-hpc: $(top_srcdir)install-intel-oneapi-hpc.in
+install-intel-oneapi-hpc: $(top_srcdir)/install-intel-oneapi-hpc.in
 
-install-rocm-binaries: $(top_srcdir)install-rocm-binaries.in
+install-rocm-binaries: $(top_srcdir)/install-rocm-binaries.in

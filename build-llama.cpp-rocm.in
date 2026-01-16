@@ -208,16 +208,11 @@ build-llama.cpp ()
               -S "$srcdir" \
               -B "$builddir" \
               -DCMAKE_INSTALL_PREFIX="${install_prefix}" \
-              -DCMAKE_INSTALL_RPATH="${install_prefix}/lib64;${ONEAPI_ROOT}/compiler/latest/lib;${ONEAPI_ROOT}/mkl/latest/lib" \
+              -DCMAKE_INSTALL_RPATH="${install_prefix}/lib64" \
               -DGGML_HIP=ON \
               -DGGML_HIP_ROCWMMA_FATTN=ON \
               -DAMDGPU_TARGETS=gfx1151 \
               -DCMAKE_BUILD_TYPE=Release \
-              -DGGML_BLAS=ON \
-              -DGGML_BLAS_VENDOR=Intel10_64lp \
-              -DCMAKE_C_COMPILER=icx \
-              -DCMAKE_CXX_COMPILER=icpx \
-              -DGGML_NATIVE=ON \
               -DLLAMA_CURL=ON \
         || return $?
 
@@ -268,7 +263,7 @@ if test ."$0" = ."${BASH_SOURCE[0]}"; then
 
     echo "Building llama.cpp with ROCm and Intel cuBLAS support" >&2
 
-    check-oneapi-env "$oneapi_root" || exit $?
+    # check-oneapi-env "$oneapi_root" || exit $?
     check-rocm-env "$amdgpu_target" "$ucx_root" "$ompi_root" "$rocm_root" || exit $?
     verify-python "$py_version" || exit $?
     clone-repo "$llama_repo_url" "$llama_srcdir" || exit $?

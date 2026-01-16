@@ -174,7 +174,7 @@ if test ."$0" = ."${BASH_SOURCE[0]}"; then
 
     echo "Installing llama.cpp with ROCm and Intel cuBLAS support" >&2
 
-    check-oneapi-env || exit $?
+    # check-oneapi-env || exit $?
     check-rocm-env || exit $?
     verify-python "$py_version" || exit $?
     # set-alternatives gcc /usr/bin/x86_64-linux-gnu-gcc-15 || exit $?
