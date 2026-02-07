@@ -1,0 +1,138 @@
+#!/usr/bin/env bash
+#
+# @(#) install-vulkan-sdk
+#
+# This script fetches and installs the latest version of LunarG's
+# VulkanSDK.
+#
+: ${CURL_CMD:='@CURL_CMD@'}
+: ${INSTALL_CMD:='@INSTALL_CMD@'}
+: ${JQ_CMD:='@JQ_CMD@'}
+: ${LDCONFIG_CMD:='@LDCONFIG_CMD@'}
+: ${RM_CMD:='@RM_CMD@'}
+: ${SED_CMD:='@SED_CMD@'}
+: ${SUDO_CMD:='@SUDO_CMD@'}
+: ${TAR_CMD:='@TAR_CMD@'}
+: ${TOUCH_CMD:='@TOUCH_CMD@'}
+: ${TEE_CMD:='@TEE_CMD@'}
+: ${TR_CMD:='@TR_CMD@'}
+: ${UNAME_CMD:='@UNAME_CMD@'}
+: ${XZ_CMD:='@XZ_CMD@'}
+
+: ${VULKAN_SDK_ROOT:='/opt/lunarg/vulkan'}
+
+get-latest-vulkan-sdk ()
+{
+    local api_url=$1
+    local target=$2
+
+    $CURL_CMD -sSL --no-buffer "${api_url}/latest.json" |
+        $JQ_CMD -r ".$target"
+}
+
+is-installed ()
+{
+    local vulkan_sdk_root=$1
+    local version=$2
+
+    test -d "${vulkan_sdk_root}/${version}"
+}
+
+initialize-installdir ()
+{
+    local vulkan_sdk_root=$1
+
+    $SUDO_CMD $RM_CMD -rf "$vulkan_sdk_root"
+    $SUDO_CMD $INSTALL_CMD -d -m 0755 "$vulkan_sdk_root"
+}
+
+fetch-compressed-archive ()
+{
+    local url=$1
+    local target=$2
+    local version=$3
+
+    echo "Fetching: ${url}/${version}/${target}/vulkan_sdk.tar.xz" >&2
+
+    $CURL_CMD -sSL "${url}/${version}/${target}/vulkan_sdk.tar.xz"
+}
+
+extract-archive-stream ()
+{
+    local vulkan_sdk_root=$1
+
+    $XZ_CMD -cd - |
+        $SUDO_CMD $TAR_CMD -C "$vulkan_sdk_root" -xf -
+}
+
+fetch-config ()
+{
+    local vulkan_sdk_root=$1
+    local api_url=$2
+    local target=$3
+    local version=$4
+
+    echo "Fetching: ${api_url}/config/${version}/${target}/config.json" >&2
+
+    $SUDO_CMD $CURL_CMD -o "${vulkan_sdk_root}/config.json" \
+              -sSL "${api_url}/config/${version}/${target}/config.json"
+}
+
+set-ldconfig ()
+{
+    local vulkan_sdk=$1
+
+    if test ! -f /etc/ld.so.conf.d/vulkan.conf; then
+        $SUDO_CMD $TEE_CMD >/dev/null /etc/ld.so.conf.d/vulkan.conf <<<"${vulkan_sdk}/lib" || return $?
+        $SUDO_CMD $LDCONFIG_CMD || return $?
+    fi
+}
+
+set-vulkan-env ()
+{
+    local vulkan_sdk=$1
+
+    $SUDO_CMD $TEE_CMD /etc/profile.d/vulkan-sdk.sh >/dev/null \
+              <<<"export VULKAN_SDK=$vulkan_sdk"
+}
+
+if test ."$0" = ."${BASH_SOURCE[0]}"; then
+    set -o pipefail
+
+    declare script=''
+    declare script_name=''
+    declare script_dir=''
+
+    script=$(readlink -e "$0")
+    script_name=${script##*/}
+    script_dir=${script%/*}
+
+    declare vulkan_sdk_root=${1:-"$VULKAN_SDK_ROOT"}
+
+    declare vulkan_sdk_api='https://vulkan.lunarg.com/sdk'
+    declare vulkan_sdk_url='https://sdk.lunarg.com/sdk/download'
+    declare latest_vulkan_sdk=''
+    declare platform=''
+    declare arch=''
+
+    platform=$($UNAME_CMD -s | $TR_CMD A-Z a-z) || exit $?
+    arch=$($UNAME_CMD -m) || exit $?
+
+    if ! latest_vulkan_sdk=$(get-latest-vulkan-sdk "$vulkan_sdk_api" "$platform"); then
+        echo "${script_name}: ${amdgpu_target}: Not found" >&2
+        exit 1
+    elif is-installed "$vulkan_sdk_root" "$latest_vulkan_sdk"; then
+        echo "${script_name}: ${latest_vulkan_sdk}: Already installed" >&2
+        exit 0
+    fi
+
+    initialize-installdir "$vulkan_sdk_root" || exit $?
+    fetch-compressed-archive "$vulkan_sdk_url" "$platform" "$latest_vulkan_sdk" |
+        extract-archive-stream "$vulkan_sdk_root" || exit $?
+    fetch-config "$vulkan_sdk_root" "$vulkan_sdk_api" "$platform" "$latest_vulkan_sdk"
+
+    declare vulkan_sdk="${vulkan_sdk_root}/${latest_vulkan_sdk}/${arch}"
+
+    set-ldconfig "$vulkan_sdk" || exit $?
+    set-vulkan-env "$vulkan_sdk" || exit $?
+fi

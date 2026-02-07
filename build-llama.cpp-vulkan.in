@@ -19,6 +19,7 @@
 : ${GIT_CMD:='@GIT_CMD@'}
 : ${GREP_CMD:='@GREP_CMD@'}
 : ${HIPCONFIG_CMD:='@HIPCONFIG_CMD@'}
+: ${JQ_CMD:='@JQ_CMD@'}
 : ${MAKE_CMD:='@MAKE_CMD@'}
 : ${NPROC_CMD:='@NPROC_CMD@'}
 : ${PATCH_CMD:='@PATCH_CMD@'}
@@ -28,14 +29,11 @@
 : ${SORT_CMD:='@SORT_CMD@'}
 : ${SUDO_CMD:='@SUDO_CMD@'}
 : ${TEE_CMD:='@TEE_CMD@'}
+: ${UNAME_CMD:='@UNAME_CMD@'}
 : ${UPDATE_ALTERNATIVES_CMD:='@UPDATE_ALTERNATIVES_CMD@'}
 
 : ${INSTALL_PREFIX:='/usr/local'}
-: ${AMDGPU_TARGET:='gfx1151'}
-: ${ONEAPI_ROOT:='/opt/intel/oneapi'}
-: ${ROCM_ROOT:='/opt/rocm'}
-: ${OMPI_ROOT:='/usr/local'}
-: ${UCX_ROOT:='/usr/local'}
+: ${VULKAN_SDK_ROOT:='/opt/lunarg/vulkan'}
 
 # OS-agnstoic readlink for existent files/directories.
 resolve-existing ()
@@ -62,48 +60,36 @@ set-alternatives ()
     fi
 }
 
-check-oneapi-env ()
+check-vulkan-env ()
 {
-    local oneapi_root=$1
+    local vulkan_sdk_root=$1
 
-    if test ! -d "$oneapi_root"; then
-        $SUDO_CMD -i ${script_dir}/install-intel-oneapi-hpc || return $?
+    if test ."$VULKAN_SDK" = .'' -o ! -d "$VULKAN_SDK" \
+            || [[ ! ."$VULKAN_SDK" =~ ^\.$vulkan_sdk_root ]]; then
+        if test ! -f "${vulkan_sdk_root}/config.json"; then
+            ${script_dir}/install-vulkan-sdk "$vulkan_sdk_root" || return $?
+        fi
     fi
 
-    if ! command -v icx >/dev/null; then
-        source /opt/intel/oneapi/setvars.sh
-    fi
-}
+    local arch=''
+    local version=''
 
-check-rocm-env ()
-{
-    local amdgpu_target=$1
-    local ucx_root=$2
-    local ompi_root=$3
-    local rocm_root=$4
+    arch=$($UNAME_CMD -m) || return $?
+    version=$($JQ_CMD -r '.version' "${vulkan_sdk_root}/config.json") || return $?
 
-    if test ! -d "${rocm_root}/bin"; then
-        $SUDO_CMD -i ${script_dir}/install-rocm-binaries \
-                  "$amdgpu_target" \
-                  "$ucx_root" \
-                  "$ompi_root" \
-                  "$rocm_root" \
-            || return $?
-    fi
-
-    if ! $GREP_CMD -q rocm <<<$PATH; then
-        export PATH=${rocm_root}/bin:${PATH}
-    fi
-
-    if ! command -v rocminfo >/dev/null; then
-        echo "Error: ROCm installation not found in ${ROCM_ROOT}" >&2
-        return 1
-    fi
+    export VULKAN_SDK=${vulkan_sdk_root}/${version}/${arch} \
+           LD_LIBRARY_PATH=${VULKAN_SDK}/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH} \
+           VL_ADD_LAYER_PATH=${VULKAN_SDK}/share/vulkan/explicit_layer.d \
+           PKG_CONFIG_PATH=${VULKAN_SDK}/share/pkgconfig:${VULKAN_SDK}/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}
 }
 
 verify-python ()
 {
     local version=$1
+
+    pushd "${script_dir}" >/dev/null || return $?
+
+    trap 'exit 1' 0 1 2 15 RETURN
 
     if ! command -v "$ASDF_CMD" >/dev/null && test -x "${HOME}/bin/asdf"; then
         export PATH=${PATH}:${HOME}/bin
@@ -115,7 +101,7 @@ verify-python ()
         fi
 
         python_available=$(
-            $ED_CMD -s <(cd "$script_dir" && $ASDF_CMD list) <<EOF
+            $ED_CMD -s <($ASDF_CMD list) <<EOF
 g/^python/1,.d
 g/^[a-z]/.,\$d
 ,! $GREP_CMD "$version" | $SORT_CMD -V
@@ -139,24 +125,25 @@ EOF
                 ;;
             *)
                 $ASDF_CMD plugin add python || return $?
-                latest=$($ASDF_CMD latest python 3.11)
+                latest=$(eval $ASDF_CMD latest python "$version") || return $?
                 $ASDF_CMD install python "$latest" || return $?
-                (cd "$script_dir" && $ASDF_CMD set python "$latest") || return $?
-                $ASDF_CMD reshim python || return $?
-
-                export PATH=${HOME}/.asdf/shims:${PATH}:${HOME}/bin
+                $ASDF_CMD set python "$latest" || return $?
                 ;;
         esac
     else
         ${script_dir}/install-asdf || return $?
         $ASDF_CMD plugin add python || return $?
-        latest=$($ASDF_CMD latest python 3.11)
+        latest=$(eval $ASDF_CMD latest python "$version") || return $?
         $ASDF_CMD install python "$latest" || return $?
-        (cd "$script_dir" && $ASDF_CMD set python "$latest") || return $?
+        $ASDF_CMD set python "$latest" || return $?
         $ASDF_CMD reshim python || return $?
 
         export PATH=${HOME}/.asdf/shims:${PATH}:${HOME}/bin
     fi
+
+    popd >/dev/null || return $?
+
+    trap - 0 1 2 15 RETURN
 }
 
 clone-repo ()
@@ -189,9 +176,11 @@ patch-repo ()
     fi
 
     local patchfile=''
+    local subdir=''
 
     for patchfile in "${patchdir}/"*.diff; do
-        $PATCH_CMD -d "$srcdir" <"$patchfile" || return $?
+        subdir=$($ED_CMD -e '/^+++ /s;;;' -e 's;/[^/]*$;;p' "$patchfile") || return $?
+        $PATCH_CMD -d "${srcdir}/${subdir}" <"$patchfile" || return $?
     done
 
     $CAT_CMD >&2 <<'EOF'
@@ -210,34 +199,23 @@ build-llama.cpp ()
     local builddir=${srcdir}/build
 
     $RM_CMD -rf "$builddir" || return $?
-    HIPCXX="$($HIPCONFIG_CMD -l)/clang" \
-          HIP_PATH="$($HIPCONFIG_CMD -R)" \
-          HIP_PLATFORM=amd \
-          $CMAKE_CMD \
-              -S "$srcdir" \
-              -B "$builddir" \
-              -DCMAKE_INSTALL_PREFIX="${install_prefix}" \
-              -DCMAKE_INSTALL_RPATH="${install_prefix}/lib64" \
-              -DGGML_HIP=ON \
-              -DGGML_HIP_ROCWMMA_FATTN=ON \
-              -DAMDGPU_TARGETS=gfx1151 \
-              -DCMAKE_BUILD_TYPE=Release \
-              -DLLAMA_CURL=ON \
+    $CMAKE_CMD \
+        -S "$srcdir" \
+        -B "$builddir" \
+        -DCMAKE_INSTALL_PREFIX="${install_prefix}" \
+        -DCMAKE_INSTALL_RPATH="${install_prefix}/lib64:${LD_LIBRARY_PATH}" \
+        -DGGML_VULKAN=ON \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DLLAMA_CURL=ON \
         || return $?
 
-# OneAPI CMake options
-#               -DCMAKE_INSTALL_RPATH="${install_prefix}/lib64;${ONEAPI_ROOT}/compiler/latest/lib;${ONEAPI_ROOT}/mkl/latest/lib" \
-#               -DGGML_BLAS=ON \
-#               -DGGML_BLAS_VENDOR=Intel10_64lp \
-#               -DCMAKE_C_COMPILER=icx \
-#               -DCMAKE_CXX_COMPILER=icpx \
-#               -DGGML_NATIVE=ON \
-
-    $MAKE_CMD -C "$builddir" -j$($NPROC_CMD) |&
-        $TEE_CMD "${builddir}/build.OUT"
+    $MAKE_CMD -C "$builddir" -j$($NPROC_CMD) VERBOSE=1 |&
+        $TEE_CMD "${script_dir}/build.OUT" || return $?
 }
 
 if test ."$0" = ."${BASH_SOURCE[0]}"; then
+    set -o pipefail
+
     declare script=''
     declare script_dir=''
     declare script_name=''
@@ -259,24 +237,22 @@ if test ."$0" = ."${BASH_SOURCE[0]}"; then
 
     declare abs_srcdir=${1:-"$top_srcdir"}
     declare install_prefix=${2:-"$INSTALL_PREFIX"}
-    declare amdgpu_target=${3:-"$AMDGPU_TARGET"}
-    declare rocm_root=${4:-"$ROCM_ROOT"}
-    declare ompi_root=${5:-"$OMPI_ROOT"}
-    declare ucx_root=${6:-"$UCX_ROOT"}
-    declare oneapi_root=${7:-"$ONEAPI_ROOT"}
+    declare vulkan_sdk_root=${3:-"$VULKAN_SDK_ROOT"}
 
     declare llama_repo_url='https://github.com/ggml-org/llama.cpp.git'
     declare llama_srcdir=${script_dir}/src/llama.cpp
-    declare llama_patchdir=${abs_srcdir}/patches/llama.cpp
+    declare llama_patchdir=${abs_srcdir}/patches
     declare py_version='3\.11'
+    declare platform=''
 
-    echo "Building llama.cpp with ROCm and Intel cuBLAS support" >&2
+    platform=$($UNAME_CMD -s | $TR_CMD A-Z a-z) || exit $?
 
-    # check-oneapi-env "$oneapi_root" || exit $?
-    check-rocm-env "$amdgpu_target" "$ucx_root" "$ompi_root" "$rocm_root" || exit $?
+    echo "Building llama.cpp with Vulkan support" >&2
+
+    check-vulkan-env "$vulkan_sdk_root" || exit $?
     verify-python "$py_version" || exit $?
     clone-repo "$llama_repo_url" "$llama_srcdir" || exit $?
-    # patch-repo "$llama_srcdir" "$llama_patchdir" || exit $?
+    apply-patches "$llama_srcdir" "$llama_patchdir" || exit $?
     # set-alternatives gcc /usr/bin/x86_64-linux-gnu-gcc-15 || exit $?
     # set-alternatives g++ /usr/bin/x86_64-linux-gnu-g++-15 || exit $?
     # set-alternatives gfortran /usr/bin/x86_64-linux-gnu-gfortran-15 || exit $?
