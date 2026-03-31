@@ -19,7 +19,7 @@ all: llama.cpp-vulkan
 
 llama.cpp-vulkan: build-llama.cpp-vulkan install-vulkan-sdk
 	$(BUILD_DIR)install-vulkan-sdk
-	$(BUILD_DIR)build-llama.cpp-vulkan $(abs_srcdir)
+	$(BUILD_DIR)build-llama.cpp-vulkan "$(abs_srcdir)" "$(prefix)"
 
 install: install-exec-local
 
