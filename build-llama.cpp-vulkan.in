@@ -252,7 +252,7 @@ if test ."$0" = ."${BASH_SOURCE[0]}"; then
     check-vulkan-env "$vulkan_sdk_root" || exit $?
     verify-python "$py_version" || exit $?
     clone-repo "$llama_repo_url" "$llama_srcdir" || exit $?
-    apply-patches "$llama_srcdir" "$llama_patchdir" || exit $?
+    patch-repo "$llama_srcdir" "$llama_patchdir" || exit $?
     # set-alternatives gcc /usr/bin/x86_64-linux-gnu-gcc-15 || exit $?
     # set-alternatives g++ /usr/bin/x86_64-linux-gnu-g++-15 || exit $?
     # set-alternatives gfortran /usr/bin/x86_64-linux-gnu-gfortran-15 || exit $?
